@@ -1,0 +1,6 @@
+{
+  "name": "TeleVoice Converter",
+  "description": "Convert MP3, WAV, M4A, and audio files into authentic Telegram-compatible OGG/Opus voice messages with waveform visualization and direct Telegram Bot sending.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
