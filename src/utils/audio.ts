@@ -25,7 +25,9 @@ export function formatBytes(bytes: number, decimals = 1): string {
  * Guarantees download triggers across all browsers and iframe sandboxes
  */
 export async function downloadAudioFile(url: string, filename: string): Promise<boolean> {
-  const safeFilename = filename.endsWith('.ogg') ? filename : `${filename}.ogg`;
+  const safeFilename = (filename.endsWith('.opus') || filename.endsWith('.ogg'))
+    ? filename
+    : (url.includes('.opus') ? `${filename}.opus` : `${filename}.ogg`);
   try {
     const downloadUrl = url.includes('?') ? `${url}&download=1` : `${url}?download=1`;
     const res = await fetch(downloadUrl);
@@ -60,35 +62,51 @@ export async function downloadAudioFile(url: string, filename: string): Promise<
 }
 
 /**
- * Share voice file directly to Telegram (via Web Share API or Telegram Web)
+ * 1-Click Direct Audio File Share to WhatsApp, Messenger, Telegram, etc.
+ * Sends the pure audio file directly without sending any text links.
+ * When files: [file] is passed alone, WhatsApp, Telegram, and Messenger receive
+ * the actual audio/voice note file rather than a web link.
  */
-export async function shareAudioToTelegram(audioUrl: string, filename: string): Promise<'native-share' | 'telegram-web' | 'failed'> {
-  const safeFilename = filename.endsWith('.ogg') ? filename : `${filename}.ogg`;
-  try {
-    const downloadUrl = audioUrl.includes('?') ? `${audioUrl}&download=1` : `${audioUrl}?download=1`;
-    const res = await fetch(downloadUrl);
-    const blob = await res.blob();
-    const file = new File([blob], safeFilename, {
-      type: 'audio/ogg; codecs=opus',
-    });
-
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+export async function shareVoiceFileDirect(
+  file: File,
+  onFallbackDownload?: () => void
+): Promise<{ success: boolean; isNative: boolean }> {
+  // Check if browser supports native file sharing
+  if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      // CRITICAL: Do NOT include 'text' or 'url' fields here!
+      // When text or url is included, WhatsApp and Messenger often send the URL link
+      // instead of attaching the actual audio voice memo!
       await navigator.share({
         files: [file],
-        title: 'টেলিগ্রাম ভয়েস মেসেজ',
-        text: 'টেলিভয়েস কনভার্টার দিয়ে তৈরি খাঁটি টেলিগ্রাম ভয়েস মেসেজ',
       });
-      return 'native-share';
+      return { success: true, isNative: true };
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        // User closed or dismissed the share drawer
+        return { success: true, isNative: true };
+      }
+      console.warn('Native file share failed:', err);
     }
-  } catch (err) {
-    console.warn('Web Share API error or dismissed:', err);
   }
 
-  // Fallback: Open Telegram direct share dialog
-  const absoluteUrl = audioUrl.startsWith('http') ? audioUrl : window.location.origin + audioUrl;
-  const shareText = encodeURIComponent('টেলিভয়েস কনভার্টার দিয়ে তৈরি টেলিগ্রাম ভয়েস মেসেজ');
-  window.open(`https://t.me/share/url?url=${encodeURIComponent(absoluteUrl)}&text=${shareText}`, '_blank');
-  return 'telegram-web';
+  // If native file sharing is not supported (e.g. desktop browsers):
+  // Trigger instant direct download so the user can easily drop it into WhatsApp or Messenger
+  if (onFallbackDownload) {
+    onFallbackDownload();
+  } else {
+    const objectUrl = window.URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = file.name;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => window.URL.revokeObjectURL(objectUrl), 2000);
+  }
+
+  return { success: true, isNative: false };
 }
 
 /**
@@ -163,3 +181,42 @@ export function unpackTelegramWaveform(base64: string): number[] {
     return Array(100).fill(12);
   }
 }
+
+/**
+ * Robust JSON fetch wrapper that gracefully handles HTML error responses
+ * from proxies, Cloud Run, and web servers without throwing "Unexpected token '<'"
+ */
+export async function safeJsonFetch<T = any>(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  defaultErrorMessage = 'অনুরোধটি প্রক্রিয়া করা যায়নি।'
+): Promise<T> {
+  const response = await fetch(input, init);
+  const contentType = response.headers.get('content-type') || '';
+
+  if (contentType.includes('application/json')) {
+    const data = await response.json();
+    if (!response.ok || (data && data.ok === false) || (data && data.error)) {
+      throw new Error(data.error || data.details || defaultErrorMessage);
+    }
+    return data;
+  }
+
+  // Not JSON! Server returned HTML or plaintext error
+  const text = await response.text();
+  if (response.status === 413 || text.includes('413') || text.toLowerCase().includes('too large')) {
+    throw new Error('ফাইলের আকার অনেক বড় (সার্ভার লিমিট অতিক্রম করেছে)। অনুগ্রহ করে ২৮ MB এর নিচের ফাইল আপলোড করুন।');
+  }
+  if (response.status === 502 || response.status === 504) {
+    throw new Error('সার্ভার গেটওয়ে রেসপন্স দেয়নি। অনুগ্রহ করে একটু পর আবার চেষ্টা করুন।');
+  }
+  if (response.status === 404) {
+    throw new Error('এপিআই সার্ভার রুট খুঁজে পাওয়া যায়নি। অনুগ্রহ করে পেজটি রিফ্রেশ করুন।');
+  }
+  if (!response.ok) {
+    throw new Error(`সার্ভার ত্রুটি (${response.status})। অনুগ্রহ করে আবার চেষ্টা করুন।`);
+  }
+
+  throw new Error(defaultErrorMessage);
+}
+

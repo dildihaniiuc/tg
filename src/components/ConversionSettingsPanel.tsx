@@ -1,5 +1,5 @@
-import React from 'react';
-import { Sliders, Volume2, Mic, Info, Check } from 'lucide-react';
+import React, { useState } from 'react';
+import { Sliders, ChevronDown, ChevronUp, Check, Leaf } from 'lucide-react';
 import { ConversionSettings } from '../types';
 
 interface ConversionSettingsPanelProps {
@@ -8,36 +8,15 @@ interface ConversionSettingsPanelProps {
   disabled?: boolean;
 }
 
-const BITRATE_OPTIONS: Array<{
+const BITRATE_PRESETS: Array<{
   value: ConversionSettings['bitrate'];
   label: string;
-  tag: string;
-  description: string;
+  desc: string;
 }> = [
-  {
-    value: '32k',
-    label: '৩২ kbps',
-    tag: 'স্ট্যান্ডার্ড টেলিগ্রাম ভয়েস',
-    description: 'টেলিগ্রামের অফিসিয়াল ভয়েস স্ট্যান্ডার্ড। সর্বোচ্চ স্পষ্টতা এবং সর্বনিম্ন সাইজ।',
-  },
-  {
-    value: '24k',
-    label: '২৪ kbps',
-    tag: 'আল্ট্রা-কমপ্যাক্ট ভয়েস',
-    description: 'দীর্ঘ রেকর্ডিং, লেকচার ও ধীরগতির ইন্টারনেটের জন্য সেরা।',
-  },
-  {
-    value: '48k',
-    label: '৪৮ kbps',
-    tag: 'উচ্চমানের ভয়েস',
-    description: 'পডকাস্ট ক্লিপ ও স্পষ্ট কথ্য অডিওর জন্য উপযুক্ত।',
-  },
-  {
-    value: '64k',
-    label: '৬৪ kbps',
-    tag: 'স্টুডিও কোয়ালিটি',
-    description: 'ব্যাকগ্রাউন্ড সুর বা মিউজিক সহ সর্বোচ্চ স্পষ্টতার জন্য।',
-  },
+  { value: '32k', label: '৩২ kbps (স্ট্যান্ডার্ড)', desc: 'টেলিগ্রাম ও হোয়াটসঅ্যাপের জন্য সেরা স্পষ্টতা' },
+  { value: '24k', label: '২৪ kbps (কম্প্যাক্ট)', desc: 'দীর্ঘ রেকর্ডিং ও সর্বনিম্ন ফাইলের সাইজ' },
+  { value: '48k', label: '৪৮ kbps (এইচডি)', desc: 'উচ্চমানের পডকাস্ট বা পরিষ্কার কথ্য অডিও' },
+  { value: '64k', label: '৬৪ kbps (স্টুডিও)', desc: 'মিউজিক বা ব্যাকগ্রাউন্ড সাউন্ড সহ' },
 ];
 
 export const ConversionSettingsPanel: React.FC<ConversionSettingsPanelProps> = ({
@@ -45,184 +24,153 @@ export const ConversionSettingsPanel: React.FC<ConversionSettingsPanelProps> = (
   onChange,
   disabled = false,
 }) => {
-  const handleBitrateSelect = (bitrate: ConversionSettings['bitrate']) => {
-    onChange({ ...settings, bitrate });
-  };
-
-  const handleOpusAppSelect = (opusApplication: ConversionSettings['opusApplication']) => {
-    onChange({ ...settings, opusApplication });
-  };
-
-  const handleNormalizeToggle = () => {
-    onChange({ ...settings, normalize: !settings.normalize });
-  };
-
-  const handleSpeechBoostToggle = () => {
-    onChange({ ...settings, speechBoost: !settings.speechBoost });
-  };
+  const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <div className="w-full rounded-2xl border border-white/[0.08] bg-[#121824] p-5 shadow-xl">
-      <div className="flex items-center justify-between border-b border-white/[0.06] pb-3 mb-4">
-        <div className="flex items-center gap-2">
-          <Sliders className="h-4 w-4 text-purple-400" />
-          <h3 className="text-sm font-semibold text-white">ট্রান্সকোডার সেটিংস</h3>
+    <div className="w-full rounded-2xl border border-emerald-800/40 bg-[#062114]/80 backdrop-blur-md overflow-hidden transition-all shadow-md">
+      {/* Header / Toggle */}
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between p-3.5 px-4 text-xs hover:bg-emerald-900/20 transition-colors cursor-pointer text-left"
+      >
+        <div className="flex items-center gap-2 text-emerald-200">
+          <Sliders className="h-3.5 w-3.5 text-emerald-400" />
+          <span className="font-semibold text-emerald-100">উন্নত অডিও সেটিংস</span>
+          <span className="text-emerald-700">·</span>
+          <span className="text-emerald-300 font-mono text-[11px]">
+            {settings.targetFormat === 'whatsapp'
+              ? 'WhatsApp (.opus)'
+              : settings.targetFormat === 'messenger'
+              ? 'Messenger (.opus)'
+              : 'Telegram (.ogg)'} · {settings.bitrate}
+          </span>
         </div>
-        <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-          <span>৪৮ kHz</span>
-          <span>·</span>
-          <span>মনো (১ চ্যানেল)</span>
-          <span>·</span>
-          <span className="text-cyan-400">Opus</span>
-        </div>
-      </div>
 
-      {/* Bitrate Selector */}
-      <div>
-        <label className="text-xs font-medium text-slate-300 block mb-2">
-          অপাস অডিও বিটরেট (Opus Bitrate)
-        </label>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-          {BITRATE_OPTIONS.map((opt) => {
-            const isSelected = settings.bitrate === opt.value;
-            return (
+        <div className="flex items-center gap-1.5 text-emerald-400">
+          <span className="text-[11px]">{isOpen ? 'লুকান' : 'কাস্টমাইজ'}</span>
+          {isOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </div>
+      </button>
+
+      {/* Expandable Panel */}
+      {isOpen && (
+        <div className="p-4 pt-2 border-t border-emerald-900/40 bg-[#04160e]/90 space-y-3.5">
+          {/* Format preference */}
+          <div>
+            <label className="text-[11px] font-medium text-emerald-300/80 block mb-2">
+              ডিফল্ট ভয়েস ফরম্যাট:
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
-                key={opt.value}
                 type="button"
                 disabled={disabled}
-                onClick={() => handleBitrateSelect(opt.value)}
-                className={`flex flex-col text-left p-3 rounded-xl border transition-all ${
-                  isSelected
-                    ? 'border-cyan-500/80 bg-cyan-950/20 shadow-sm shadow-cyan-500/10'
-                    : 'border-white/[0.06] bg-[#0f1420]/60 hover:border-white/20 hover:bg-[#161f2e]'
-                } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                onClick={() => onChange({ ...settings, targetFormat: 'whatsapp' })}
+                className={`flex items-center justify-between p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                  settings.targetFormat === 'whatsapp'
+                    ? 'border-emerald-500 bg-emerald-900/40 text-white shadow-sm'
+                    : 'border-emerald-900/50 bg-emerald-950/30 text-emerald-300/70 hover:text-emerald-100'
+                }`}
               >
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-sm font-bold text-white tabular-nums">
-                    {opt.label}
-                  </span>
-                  {isSelected && (
-                    <div className="flex h-4 w-4 items-center justify-center rounded-full bg-cyan-500 text-[#0b0f17]">
-                      <Check className="h-2.5 w-2.5 stroke-[3]" />
-                    </div>
-                  )}
+                <div>
+                  <span className="text-xs font-semibold block text-[#25D366]">WhatsApp (.opus)</span>
+                  <span className="text-[10px] text-emerald-400/70 block mt-0.5">হোয়াটসঅ্যাপ PTT বাবল</span>
                 </div>
-                <span className={`text-[11px] font-medium mt-1 ${isSelected ? 'text-cyan-300' : 'text-purple-300'}`}>
-                  {opt.tag}
-                </span>
-                <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">
-                  {opt.description}
-                </p>
+                {settings.targetFormat === 'whatsapp' && <Check className="h-3.5 w-3.5 text-emerald-400 shrink-0 ml-1" />}
               </button>
-            );
-          })}
-        </div>
-      </div>
 
-      {/* Advanced Toggles */}
-      <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3 border-t border-white/[0.06] pt-4">
-        {/* Opus Tuning Profile */}
-        <div className="flex flex-col justify-between rounded-xl border border-white/[0.06] bg-[#0f1420]/60 p-3">
-          <div className="flex items-center gap-2">
-            <Mic className="h-4 w-4 text-cyan-400 shrink-0" />
-            <span className="text-xs font-medium text-white">অপাস প্রোফাইল</span>
-          </div>
-          <div className="mt-2.5 flex items-center rounded-lg bg-black/30 p-1 border border-white/[0.06]">
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => handleOpusAppSelect('voip')}
-              className={`flex-1 py-1 text-[11px] font-medium rounded-md transition-all ${
-                settings.opusApplication === 'voip'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              ভিওআইপি / কথ্য
-            </button>
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => handleOpusAppSelect('audio')}
-              className={`flex-1 py-1 text-[11px] font-medium rounded-md transition-all ${
-                settings.opusApplication === 'audio'
-                  ? 'bg-purple-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              ফুল অডিও
-            </button>
-          </div>
-        </div>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onChange({ ...settings, targetFormat: 'messenger' })}
+                className={`flex items-center justify-between p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                  settings.targetFormat === 'messenger'
+                    ? 'border-[#0084FF] bg-blue-950/50 text-white shadow-sm ring-1 ring-[#0084FF]/40'
+                    : 'border-emerald-900/50 bg-emerald-950/30 text-emerald-300/70 hover:text-emerald-100'
+                }`}
+              >
+                <div>
+                  <span className="text-xs font-semibold block text-[#00C6FF]">Messenger (.opus)</span>
+                  <span className="text-[10px] text-emerald-400/70 block mt-0.5">মেসেঞ্জার অডিও বাবল</span>
+                </div>
+                {settings.targetFormat === 'messenger' && <Check className="h-3.5 w-3.5 text-cyan-400 shrink-0 ml-1" />}
+              </button>
 
-        {/* Loudness Normalization */}
-        <div className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-[#0f1420]/60 p-3">
-          <div className="pr-2">
-            <div className="flex items-center gap-1.5">
-              <Volume2 className="h-4 w-4 text-purple-400 shrink-0" />
-              <span className="text-xs font-medium text-white">লাউডনেস সমতা</span>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onChange({ ...settings, targetFormat: 'telegram' })}
+                className={`flex items-center justify-between p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                  settings.targetFormat === 'telegram'
+                    ? 'border-[#229ED9] bg-cyan-950/40 text-white shadow-sm ring-1 ring-[#229ED9]/40'
+                    : 'border-emerald-900/50 bg-emerald-950/30 text-emerald-300/70 hover:text-emerald-100'
+                }`}
+              >
+                <div>
+                  <span className="text-xs font-semibold block text-[#229ED9]">Telegram (.ogg)</span>
+                  <span className="text-[10px] text-emerald-400/70 block mt-0.5">টেলিগ্রাম ওয়েভফর্ম বাবল</span>
+                </div>
+                {settings.targetFormat === 'telegram' && <Check className="h-3.5 w-3.5 text-cyan-400 shrink-0 ml-1" />}
+              </button>
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">
-              EBU R128 (-১৬ LUFS কথ্য টার্গেট)
-            </p>
           </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={settings.normalize}
-            disabled={disabled}
-            onClick={handleNormalizeToggle}
-            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-2 focus-visible:outline-purple-500 ${
-              settings.normalize ? 'bg-cyan-500' : 'bg-slate-700'
-            }`}
-          >
-            <span
-              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                settings.normalize ? 'translate-x-4' : 'translate-x-0'
-              }`}
-            />
-          </button>
-        </div>
 
-        {/* Speech Clarity Boost */}
-        <div className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-[#0f1420]/60 p-3">
-          <div className="pr-2">
-            <div className="flex items-center gap-1.5">
-              <Mic className="h-4 w-4 text-emerald-400 shrink-0" />
-              <span className="text-xs font-medium text-white">স্পষ্টতা বৃদ্ধি</span>
+          <div>
+            <label className="text-[11px] font-medium text-emerald-300/80 block mb-2">
+              ভয়েস কোয়ালিটি ও বিটরেট:
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {BITRATE_PRESETS.map((preset) => {
+                const isSelected = settings.bitrate === preset.value;
+                return (
+                  <button
+                    key={preset.value}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onChange({ ...settings, bitrate: preset.value })}
+                    className={`flex items-start justify-between p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      isSelected
+                        ? 'border-emerald-500/70 bg-emerald-900/40 text-white'
+                        : 'border-emerald-900/50 bg-emerald-950/20 text-emerald-300/70 hover:text-emerald-200 hover:border-emerald-700/50'
+                    }`}
+                  >
+                    <div>
+                      <span className="text-xs font-semibold block">{preset.label}</span>
+                      <span className="text-[10px] text-emerald-400/60 block mt-0.5">{preset.desc}</span>
+                    </div>
+                    {isSelected && <Check className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5 ml-2" />}
+                  </button>
+                );
+              })}
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">
-              হাই-পাস ১০০Hz + ২.৫kHz EQ
-            </p>
           </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={settings.speechBoost}
-            disabled={disabled}
-            onClick={handleSpeechBoostToggle}
-            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-2 focus-visible:outline-purple-500 ${
-              settings.speechBoost ? 'bg-cyan-500' : 'bg-slate-700'
-            }`}
-          >
-            <span
-              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                settings.speechBoost ? 'translate-x-4' : 'translate-x-0'
-              }`}
-            />
-          </button>
-        </div>
-      </div>
 
-      {/* Mandatory Telegram Spec Notice */}
-      <div className="mt-4 flex items-start gap-2 rounded-xl bg-purple-950/20 border border-purple-500/20 px-3.5 py-2.5 text-xs text-slate-300">
-        <Info className="h-4 w-4 text-purple-400 shrink-0 mt-0.5" />
-        <p className="leading-relaxed">
-          <strong className="text-purple-300">টেলিগ্রাম ভয়েস স্পেসিফিকেশন:</strong> অডিও স্বয়ংক্রিয়ভাবে{' '}
-          <span className="font-mono text-cyan-300">৪৮,০০০ Hz</span> এবং{' '}
-          <span className="font-mono text-cyan-300">মনো (১ চ্যানেল)</span> ফরম্যাটে রূপান্তর হবে। এটি নিশ্চিত করে যে টেলিগ্রাম অ্যাপ এটিকে ১০০% খাঁটি ভয়েস মেসেজ হিসেবে শনাক্ত করে।
-        </p>
-      </div>
+          <div className="flex flex-wrap items-center gap-4 pt-1 text-[11px] text-emerald-300/80">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={settings.normalize}
+                disabled={disabled}
+                onChange={(e) => onChange({ ...settings, normalize: e.target.checked })}
+                className="rounded border-emerald-700 bg-emerald-950 text-emerald-500 focus:ring-0 cursor-pointer"
+              />
+              <span>লাউডনেস স্বাভাবিক করুন (Normalize)</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={settings.speechBoost}
+                disabled={disabled}
+                onChange={(e) => onChange({ ...settings, speechBoost: e.target.checked })}
+                className="rounded border-emerald-700 bg-emerald-950 text-emerald-500 focus:ring-0 cursor-pointer"
+              />
+              <span>কথ্য কণ্ঠ বুস্ট (Speech Clarity)</span>
+            </label>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

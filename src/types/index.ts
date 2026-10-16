@@ -3,6 +3,7 @@ export interface ConversionSettings {
   opusApplication: 'voip' | 'audio';
   normalize: boolean;
   speechBoost: boolean;
+  targetFormat: 'whatsapp' | 'messenger' | 'telegram';
 }
 
 export interface AudioMetadata {
@@ -26,6 +27,10 @@ export interface ConversionResult {
   telegramWaveformBase64: string;
   waveformPeaks: number[];
   downloadUrl: string;
+  whatsappDownloadUrl?: string;
+  messengerDownloadUrl?: string;
+  telegramDownloadUrl?: string;
+  targetFormat?: 'whatsapp' | 'messenger' | 'telegram';
   createdAt: number;
   originalUrl?: string;
 }

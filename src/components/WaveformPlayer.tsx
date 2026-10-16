@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Play, Pause, Volume2, VolumeX, RotateCcw, FastForward } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, RotateCcw, FastForward, Leaf } from 'lucide-react';
 import { formatDuration } from '../utils/audio';
 
 interface WaveformPlayerProps {
@@ -78,7 +78,7 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
     };
   }, [currentAudioSrc]);
 
-  // Draw waveform on canvas
+  // Draw waveform on canvas with organic nature emerald aesthetics
   const drawWaveform = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -123,71 +123,73 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
       const barProgress = (i + 0.5) / totalBars;
 
       ctx.beginPath();
-      ctx.roundRect(x, y, barWidth, barHeight, [barWidth / 2]);
+      if (typeof (ctx as any).roundRect === 'function') {
+        (ctx as any).roundRect(x, y, barWidth, barHeight, [barWidth / 2]);
+      } else {
+        ctx.rect(x, y, barWidth, barHeight);
+      }
 
       if (barProgress <= progress) {
+        // Nature vibrant leaf/sprout gradient
         const gradient = ctx.createLinearGradient(0, y, 0, y + barHeight);
-        gradient.addColorStop(0, '#38bdf8'); // sky-400
-        gradient.addColorStop(1, '#818cf8'); // indigo-400
+        gradient.addColorStop(0, '#a7f3d0'); // mint / dewdrop
+        gradient.addColorStop(0.5, '#34d399'); // emerald-400
+        gradient.addColorStop(1, '#059669'); // emerald-600
         ctx.fillStyle = gradient;
       } else {
-        ctx.fillStyle = '#334155'; // slate-700
+        ctx.fillStyle = '#0f3825'; // deep pine forest unplayed bar
       }
       ctx.fill();
     }
 
-    // Draw playhead cursor
+    // Draw playhead cursor in glowing emerald
     const cursorX = progress * width;
     ctx.beginPath();
-    ctx.strokeStyle = '#a855f7'; // purple-500
-    ctx.lineWidth = 2;
-    ctx.moveTo(cursorX, 2);
-    ctx.lineTo(cursorX, height - 2);
-    ctx.stroke();
-
-    // Hover cursor indicator
-    if (hoverPosition !== null) {
-      ctx.beginPath();
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 3]);
-      ctx.moveTo(hoverPosition, 0);
-      ctx.lineTo(hoverPosition, height);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
+    ctx.arc(cursorX, height / 2, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#34d399';
+    ctx.shadowColor = '#10b981';
+    ctx.shadowBlur = 8;
+    ctx.fill();
+    ctx.shadowBlur = 0;
 
     ctx.restore();
-  }, [peaks, currentTime, duration, hoverPosition]);
+  }, [peaks, currentTime, duration]);
 
   useEffect(() => {
     drawWaveform();
   }, [drawWaveform]);
 
-  // Handle play/pause
+  // Handle resizing
+  useEffect(() => {
+    const handleResize = () => drawWaveform();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [drawWaveform]);
+
+  // Audio Play / Pause
   const togglePlay = () => {
     const audio = audioRef.current;
-    if (!audio || !currentAudioSrc) return;
+    if (!audio) return;
 
     if (isPlaying) {
       audio.pause();
     } else {
       audio.play().catch((err) => {
-        console.warn('Playback error:', err);
+        console.error('Audio playback error:', err);
       });
     }
   };
 
-  // Scrubbing on waveform canvas
+  // Seek on click or scrub
   const handleSeek = (clientX: number) => {
     const canvas = canvasRef.current;
     const audio = audioRef.current;
     if (!canvas || !audio || duration <= 0) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
-    const seekRatio = x / rect.width;
-    const targetTime = seekRatio * duration;
+    const clickX = Math.max(0, Math.min(rect.width, clientX - rect.left));
+    const seekPercentage = clickX / rect.width;
+    const targetTime = seekPercentage * duration;
 
     audio.currentTime = targetTime;
     setCurrentTime(targetTime);
@@ -248,8 +250,10 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
     }
   };
 
+  const isOpusFile = currentAudioSrc.includes('.opus');
+
   return (
-    <div className="w-full rounded-2xl border border-white/[0.08] bg-[#121824] p-5 shadow-2xl backdrop-blur-sm">
+    <div className="w-full rounded-2xl border border-emerald-800/40 bg-[#062114]/90 p-5 shadow-2xl backdrop-blur-md">
       {/* Audio Element */}
       <audio
         ref={audioRef}
@@ -259,23 +263,24 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
       />
 
       {/* Header with Track Switcher and Metadata */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.06] pb-4 mb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-900/40 pb-4 mb-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-cyan-400">
-              ইন্টারঅ্যাক্টিভ ওয়েভফর্ম প্রিভিউ
+            <span className="text-xs font-semibold tracking-wider text-emerald-400 flex items-center gap-1">
+              <Leaf className="h-3 w-3" />
+              <span>ওয়েভফর্ম প্রিভিউ</span>
             </span>
-            <span className="text-slate-600">·</span>
-            <span className="font-mono text-xs text-slate-400 tabular-nums">১০০ পিক (৫-বিট)</span>
+            <span className="text-emerald-800">·</span>
+            <span className="font-mono text-xs text-emerald-300/70 tabular-nums">১০০ পিক (৫-বিট)</span>
           </div>
-          <h4 className="mt-0.5 text-sm font-medium text-white truncate max-w-sm sm:max-w-md">
+          <h4 className="mt-0.5 text-sm font-medium text-emerald-50 truncate max-w-sm sm:max-w-md">
             {originalName}
           </h4>
         </div>
 
         {/* Source Switcher if both available */}
         {convertedAudioUrl && originalAudioUrl && (
-          <div className="flex items-center rounded-lg bg-black/40 p-1 border border-white/[0.06]">
+          <div className="flex items-center rounded-lg bg-[#04150c] p-1 border border-emerald-900/50">
             <button
               onClick={() => {
                 setActiveTrack('converted');
@@ -283,11 +288,15 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
               }}
               className={`px-3 py-1 text-xs font-medium rounded-md transition-all whitespace-nowrap ${
                 activeTrack === 'converted'
-                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-emerald-300/70 hover:text-white'
               }`}
             >
-              টেলিগ্রাম ভয়েস (.ogg)
+              {currentAudioSrc.includes('app=messenger')
+                ? 'মেসেঞ্জার ভয়েস (.opus)'
+                : isOpusFile
+                ? 'WhatsApp ভয়েস (.opus)'
+                : 'টেলিগ্রাম ভয়েস (.ogg)'}
             </button>
             <button
               onClick={() => {
@@ -296,8 +305,8 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
               }}
               className={`px-3 py-1 text-xs font-medium rounded-md transition-all whitespace-nowrap ${
                 activeTrack === 'original'
-                  ? 'bg-white/10 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-emerald-950/60 text-emerald-200 shadow-sm border border-emerald-800/50'
+                  : 'text-emerald-300/70 hover:text-white'
               }`}
             >
               আসল অডিও
@@ -306,9 +315,9 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
         )}
       </div>
 
-      {/* Telegram Style Waveform Container */}
+      {/* Waveform Container */}
       <div className="relative group">
-        <div className="relative h-24 w-full rounded-xl bg-[#0b0f17]/90 p-2 border border-white/[0.05] flex items-center">
+        <div className="relative h-24 w-full rounded-xl bg-[#04160e] p-2 border border-emerald-900/40 flex items-center shadow-inner">
           <canvas
             ref={canvasRef}
             onMouseDown={handleMouseDown}
@@ -321,7 +330,7 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
           {/* Time scrubber tooltip on hover */}
           {hoverTime !== null && hoverPosition !== null && (
             <div
-              className="pointer-events-none absolute -top-7 rounded bg-slate-900 border border-white/20 px-1.5 py-0.5 text-[11px] font-mono text-cyan-300 shadow-md tabular-nums -translate-x-1/2"
+              className="pointer-events-none absolute -top-7 rounded bg-emerald-950 border border-emerald-600/40 px-1.5 py-0.5 text-[11px] font-mono text-emerald-300 shadow-md tabular-nums -translate-x-1/2"
               style={{ left: `${hoverPosition + 8}px` }}
             >
               {formatDuration(hoverTime)}
@@ -329,24 +338,26 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
           )}
         </div>
 
-        <div className="mt-2 flex items-center justify-between text-xs font-mono text-slate-400 tabular-nums">
-          <span className="text-cyan-400 font-medium">{formatDuration(currentTime)}</span>
-          <span className="text-slate-500">
-            {activeTrack === 'converted' ? 'OGG / Opus · ৪৮ kHz মনো' : 'সোর্স অডিও'}
+        <div className="mt-2 flex items-center justify-between text-xs font-mono text-emerald-300/70 tabular-nums">
+          <span className="text-emerald-400 font-medium">{formatDuration(currentTime)}</span>
+          <span className="text-emerald-500/80">
+            {activeTrack === 'converted'
+              ? (isOpusFile ? 'Opus · WhatsApp ভয়েস বাবল' : 'OGG / Opus · Telegram ভয়েস')
+              : 'সোর্স অডিও'}
           </span>
           <span>{formatDuration(duration)}</span>
         </div>
       </div>
 
-      {/* Telegram-style Control Bar */}
+      {/* Control Bar */}
       <div className="mt-4 flex flex-wrap items-center justify-between gap-4 pt-2">
         <div className="flex items-center gap-3">
-          {/* Main Play / Pause Button with glowing circular Telegram motif */}
+          {/* Main Play / Pause Button in Nature Emerald Gradient */}
           <button
             onClick={togglePlay}
             disabled={!currentAudioSrc}
             aria-label={isPlaying ? 'ভয়েস থামান' : 'ভয়েস চালান'}
-            className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-tr from-cyan-500 via-indigo-500 to-purple-600 text-white shadow-lg shadow-cyan-500/20 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-tr from-emerald-600 via-teal-500 to-lime-400 text-white shadow-lg shadow-emerald-950/50 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 cursor-pointer"
           >
             {isPlaying ? (
               <Pause className="h-5 w-5 fill-white" />
@@ -359,7 +370,7 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
           <button
             onClick={handleRestart}
             aria-label="শুরু থেকে চালান"
-            className="rounded-lg p-2 text-slate-400 hover:bg-white/[0.06] hover:text-white transition-colors"
+            className="rounded-lg p-2 text-emerald-300/70 hover:bg-emerald-900/30 hover:text-white transition-colors"
           >
             <RotateCcw className="h-4 w-4" />
           </button>
@@ -368,26 +379,27 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
           <button
             onClick={toggleMute}
             aria-label={isMuted ? 'সাউন্ড চালু করুন' : 'সাউন্ড বন্ধ করুন'}
-            className="rounded-lg p-2 text-slate-400 hover:bg-white/[0.06] hover:text-white transition-colors"
+            className="rounded-lg p-2 text-emerald-300/70 hover:bg-emerald-900/30 hover:text-white transition-colors"
           >
             {isMuted ? <VolumeX className="h-4 w-4 text-rose-400" /> : <Volume2 className="h-4 w-4" />}
           </button>
         </div>
 
-        {/* Telegram Speed Multiplier Pill */}
+        {/* Speed Multiplier */}
         <div className="flex items-center gap-2">
           <button
             onClick={cyclePlaybackRate}
-            className="flex items-center gap-1 rounded-lg border border-white/[0.1] bg-white/[0.04] px-2.5 py-1.5 text-xs font-mono font-medium text-slate-300 hover:bg-white/[0.08] hover:text-white transition-colors tabular-nums cursor-pointer"
+            className="flex items-center gap-1 rounded-lg border border-emerald-800/40 bg-emerald-950/40 px-2.5 py-1.5 text-xs font-mono font-medium text-emerald-200 hover:bg-emerald-900/40 hover:text-white transition-colors tabular-nums cursor-pointer"
             title="প্লেব্যাক স্পিড পরিবর্তন করতে ক্লিক করুন"
           >
-            <FastForward className="h-3.5 w-3.5 text-purple-400" />
+            <FastForward className="h-3.5 w-3.5 text-emerald-400" />
             <span>{playbackRate}x</span>
           </button>
 
           {isConverted && (
-            <span className="hidden sm:inline-flex items-center rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 text-[11px] font-medium text-emerald-400">
-              খাঁটি টেলিগ্রাম ভয়েস
+            <span className="hidden sm:inline-flex items-center gap-1 rounded-md bg-emerald-950/80 border border-emerald-600/40 px-2 py-1 text-[11px] font-medium text-emerald-300">
+              <Leaf className="h-3 w-3 text-emerald-400" />
+              <span>{isOpusFile ? 'WhatsApp ভয়েস প্রস্তুত' : 'Telegram ভয়েস প্রস্তুত'}</span>
             </span>
           )}
         </div>

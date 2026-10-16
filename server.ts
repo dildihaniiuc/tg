@@ -76,10 +76,23 @@ function packTelegramWaveform(samples5bit: number[]): string {
 
 // Extract PCM samples at 8000Hz mono using FFmpeg and generate 100 authentic waveform peaks
 async function extractWaveformFromAudio(audioPath: string): Promise<{ peaks: number[]; base64Waveform: string; duration: number }> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
+    const fallbackResponse = () => {
+      const dummy = Array(100).fill(12);
+      return {
+        peaks: dummy,
+        base64Waveform: packTelegramWaveform(dummy),
+        duration: 1.0
+      };
+    };
+
     // Decode audio into raw 16-bit signed LE PCM mono at 8000Hz
     const ffmpeg = spawn('/usr/bin/ffmpeg', [
       '-i', audioPath,
+      '-map', '0:a:0',
+      '-vn',
+      '-sn',
+      '-dn',
       '-ac', '1',
       '-ar', '8000',
       '-f', 's16le',
@@ -97,75 +110,74 @@ async function extractWaveformFromAudio(audioPath: string): Promise<{ peaks: num
     });
 
     ffmpeg.on('close', (code) => {
-      if (code !== 0 && chunks.length === 0) {
-        return reject(new Error(`Waveform extraction failed: ${stderr.slice(-200)}`));
-      }
-
-      const pcmBuffer = Buffer.concat(chunks);
-      const totalSamples = Math.floor(pcmBuffer.length / 2);
-      const duration = totalSamples / 8000;
-
-      if (totalSamples === 0) {
-        const dummy = Array(100).fill(0);
-        return resolve({
-          peaks: dummy,
-          base64Waveform: packTelegramWaveform(dummy),
-          duration: 0
-        });
-      }
-
-      const samples16 = new Int16Array(
-        pcmBuffer.buffer,
-        pcmBuffer.byteOffset,
-        totalSamples
-      );
-
-      // Divide audio into 100 slices
-      const numSlices = 100;
-      const step = Math.max(1, Math.floor(totalSamples / numSlices));
-      const slicePeaks: number[] = [];
-
-      let globalMax = 0;
-      for (let i = 0; i < numSlices; i++) {
-        const start = Math.floor(i * step);
-        const end = Math.min(totalSamples, Math.floor((i + 1) * step));
-        let maxVal = 0;
-        for (let j = start; j < end; j++) {
-          const abs = Math.abs(samples16[j]);
-          if (abs > maxVal) maxVal = abs;
+      try {
+        if (code !== 0 && chunks.length === 0) {
+          console.warn('Waveform extraction FFmpeg exited with code', code, stderr.slice(-150));
+          return resolve(fallbackResponse());
         }
-        slicePeaks.push(maxVal);
-        if (maxVal > globalMax) globalMax = maxVal;
+
+        const pcmBuffer = Buffer.concat(chunks);
+        const totalSamples = Math.floor(pcmBuffer.length / 2);
+        const duration = totalSamples / 8000;
+
+        if (totalSamples === 0) {
+          return resolve(fallbackResponse());
+        }
+
+        // Divide audio into 100 slices
+        const numSlices = 100;
+        const step = Math.max(1, Math.floor(totalSamples / numSlices));
+        const slicePeaks: number[] = [];
+
+        let globalMax = 0;
+        for (let i = 0; i < numSlices; i++) {
+          const start = Math.floor(i * step);
+          const end = Math.min(totalSamples, Math.floor((i + 1) * step));
+          let maxVal = 0;
+          for (let j = start; j < end; j++) {
+            const byteIndex = j * 2;
+            if (byteIndex + 1 < pcmBuffer.length) {
+              const abs = Math.abs(pcmBuffer.readInt16LE(byteIndex));
+              if (abs > maxVal) maxVal = abs;
+            }
+          }
+          slicePeaks.push(maxVal);
+          if (maxVal > globalMax) globalMax = maxVal;
+        }
+
+        // Scale to 0..31 (5-bit integer range required by Telegram)
+        const peaks5bit = slicePeaks.map((val) => {
+          if (globalMax === 0) return 0;
+          const normalized = val / globalMax;
+          // Non-linear power scale (0.85) to enhance visual presence of quieter speech consonants
+          const scaled = Math.round(Math.pow(normalized, 0.85) * 31);
+          return Math.max(0, Math.min(31, scaled));
+        });
+
+        const base64Waveform = packTelegramWaveform(peaks5bit);
+        resolve({
+          peaks: peaks5bit,
+          base64Waveform,
+          duration: Math.max(0.1, Number(duration.toFixed(2)))
+        });
+      } catch (err) {
+        console.warn('Waveform processing error, using safe fallback:', err);
+        resolve(fallbackResponse());
       }
-
-      // Scale to 0..31 (5-bit integer range required by Telegram)
-      const peaks5bit = slicePeaks.map((val) => {
-        if (globalMax === 0) return 0;
-        const normalized = val / globalMax;
-        // Non-linear power scale (0.85) to enhance visual presence of quieter speech consonants
-        const scaled = Math.round(Math.pow(normalized, 0.85) * 31);
-        return Math.max(0, Math.min(31, scaled));
-      });
-
-      const base64Waveform = packTelegramWaveform(peaks5bit);
-      resolve({
-        peaks: peaks5bit,
-        base64Waveform,
-        duration: Math.max(0.1, Number(duration.toFixed(2)))
-      });
     });
 
     ffmpeg.on('error', (err) => {
-      reject(err);
+      console.warn('Waveform extraction process error:', err);
+      resolve(fallbackResponse());
     });
   });
 }
 
-// Multer upload config
+// Multer upload config (capped at 32MB for cloud network stability)
 const upload = multer({
   dest: UPLOADS_DIR,
   limits: {
-    fileSize: 100 * 1024 * 1024 // 100MB max
+    fileSize: 32 * 1024 * 1024 // 32MB
   }
 });
 
@@ -173,8 +185,14 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
 
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+  // Serve static files from public directory
+  const publicDir = path.resolve(__dirname, 'public');
+  if (fs.existsSync(publicDir)) {
+    app.use(express.static(publicDir));
+  }
+
+  app.use(express.json({ limit: '35mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '35mb' }));
 
   // API Health Endpoint
   app.get('/api/health', (_req, res) => {
@@ -187,8 +205,23 @@ async function startServer() {
     });
   });
 
-  // Audio Transcoding API
-  app.post('/api/convert', upload.single('audio'), async (req, res) => {
+  // Audio Transcoding API with safe Multer error handling
+  app.post('/api/convert', (req, res, next) => {
+    upload.single('audio')(req, res, (err) => {
+      if (err) {
+        if (err instanceof multer.MulterError) {
+          if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(413).json({
+              error: 'ফাইলের আকার অনেক বড়। অনুগ্রহ করে ২৮ মেগাবাইটের নিচের অডিও ফাইল আপলোড করুন।'
+            });
+          }
+          return res.status(400).json({ error: `আপলোড ত্রুটি: ${err.message}` });
+        }
+        return res.status(400).json({ error: `অডিও আপলোড ত্রুটি: ${err.message || String(err)}` });
+      }
+      next();
+    });
+  }, async (req, res) => {
     const file = req.file;
     if (!file) {
       return res.status(400).json({ error: 'No audio file uploaded.' });
@@ -198,7 +231,8 @@ async function startServer() {
       bitrate = '32k',
       opusApplication = 'voip',
       normalize = 'false',
-      speechBoost = 'false'
+      speechBoost = 'false',
+      targetFormat = 'whatsapp'
     } = req.body;
 
     // Validate bitrate
@@ -206,8 +240,21 @@ async function startServer() {
     const chosenBitrate = validBitrates.includes(bitrate) ? bitrate : '32k';
 
     const conversionId = crypto.randomUUID();
-    const outputFileName = `${path.parse(file.originalname).name}_voice.ogg`;
-    const outputPath = path.join(OUTPUT_DIR, `${conversionId}.ogg`);
+    const isWhatsApp = targetFormat === 'whatsapp';
+    const isMessenger = targetFormat === 'messenger';
+    const baseRawName = path.parse(file.originalname).name;
+    
+    let outputFileName = `${baseRawName}_voice.ogg`;
+    if (isWhatsApp) {
+      outputFileName = `${baseRawName}_whatsapp_voice.opus`;
+    } else if (isMessenger) {
+      outputFileName = `${baseRawName}_messenger_voice.opus`;
+    }
+    
+    const outputPathOgg = path.join(OUTPUT_DIR, `${conversionId}.ogg`);
+    const outputPathOpus = path.join(OUTPUT_DIR, `${conversionId}.opus`);
+    // WhatsApp and Messenger use .opus container; Telegram uses .ogg container
+    const primaryOutputPath = (isWhatsApp || isMessenger) ? outputPathOpus : outputPathOgg;
 
     // Audio filter configuration
     const audioFilters: string[] = [];
@@ -220,129 +267,186 @@ async function startServer() {
       audioFilters.push('highpass=f=100', 'equalizer=f=2500:t=q:w=1.2:g=3');
     }
 
-    const ffmpegArgs: string[] = [
-      '-i', file.path,
-      '-vn', // Strip any artwork/video streams
-      '-map_metadata', '-1', // Strip ID3 tags that cause clients to treat as music
-      '-c:a', 'libopus',
-      '-b:a', chosenBitrate,
-      '-vbr', 'on',
-      '-compression_level', '10',
-      '-application', opusApplication === 'audio' ? 'audio' : 'voip',
-      '-ar', '48000', // Telegram native Opus sample rate
-      '-ac', '1', // Telegram voice messages MUST be mono
-    ];
+    const runFfmpegTranscode = (withFilters: boolean): Promise<{ success: boolean; stderr: string }> => {
+      return new Promise((resP) => {
+        const args: string[] = [
+          '-i', file.path,
+          '-map', '0:a:0', // Explicitly pick primary audio stream
+          '-vn', // Strip artwork/video
+          '-sn', // Strip subtitles
+          '-dn', // Strip data streams
+          '-map_metadata', '-1', // Strip ID3 tags that cause clients to treat as music
+          '-c:a', 'libopus',
+          '-b:a', chosenBitrate,
+          '-vbr', 'on',
+          '-compression_level', '10',
+          '-application', opusApplication === 'audio' ? 'audio' : 'voip',
+          '-ar', '48000', // Standard high-fidelity Opus sample rate
+          '-ac', '1', // Voice messages MUST be mono
+        ];
 
-    if (audioFilters.length > 0) {
-      ffmpegArgs.push('-af', audioFilters.join(','));
-    }
+        if (withFilters && audioFilters.length > 0) {
+          args.push('-af', audioFilters.join(','));
+        }
 
-    ffmpegArgs.push(outputPath, '-y');
+        args.push(primaryOutputPath, '-y');
+
+        const proc = spawn('/usr/bin/ffmpeg', args);
+        let transcodeStderr = '';
+
+        proc.stderr.on('data', (chunk) => {
+          transcodeStderr += chunk.toString();
+        });
+
+        proc.on('close', (code) => {
+          resP({ success: code === 0, stderr: transcodeStderr });
+        });
+
+        proc.on('error', (err) => {
+          resP({ success: false, stderr: err.message });
+        });
+      });
+    };
 
     const startTime = Date.now();
-    const ffmpegProc = spawn('/usr/bin/ffmpeg', ffmpegArgs);
+    let transcodeResult = await runFfmpegTranscode(audioFilters.length > 0);
 
-    let stderr = '';
-    ffmpegProc.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
+    // If transcoding failed and audioFilters were enabled, retry once without filters for 100% reliability
+    if (!transcodeResult.success && audioFilters.length > 0) {
+      console.warn('Audio filter transcoding failed, retrying clean baseline transcode:', transcodeResult.stderr.slice(-200));
+      transcodeResult = await runFfmpegTranscode(false);
+    }
 
-    ffmpegProc.on('close', async (code) => {
-      // Remove original upload file
-      try {
-        if (fs.existsSync(file.path)) {
-          fs.unlinkSync(file.path);
-        }
-      } catch (err) {
-        console.error('Error deleting temp upload:', err);
+    // Safely remove original temp upload file
+    try {
+      if (fs.existsSync(file.path)) {
+        fs.unlinkSync(file.path);
       }
+    } catch (cleanupErr) {
+      console.error('Error deleting temp upload:', cleanupErr);
+    }
 
-      if (code !== 0) {
-        console.error('FFmpeg transcoding error:', stderr);
-        return res.status(500).json({
-          error: 'Transcoding failed. The audio file might be corrupted or in an unsupported format.',
-          details: stderr.slice(-300)
-        });
-      }
-
-      try {
-        const stats = fs.statSync(outputPath);
-        const originalSize = file.size;
-        const convertedSize = stats.size;
-        const compressionRatio = originalSize > 0
-          ? Number(((1 - convertedSize / originalSize) * 100).toFixed(1))
-          : 0;
-
-        // Generate authentic Telegram waveform from the converted audio
-        const { peaks, base64Waveform, duration } = await extractWaveformFromAudio(outputPath);
-
-        const storedData: StoredVoice = {
-          id: conversionId,
-          originalName: file.originalname,
-          originalSize,
-          convertedSize,
-          duration,
-          sampleRate: 48000,
-          channels: 1,
-          bitrate: chosenBitrate,
-          compressionRatio,
-          telegramWaveformBase64: base64Waveform,
-          waveformPeaks: peaks,
-          filePath: outputPath,
-          createdAt: Date.now()
-        };
-
-        voiceStore.set(conversionId, storedData);
-
-        return res.json({
-          id: conversionId,
-          filename: outputFileName,
-          originalName: file.originalname,
-          originalSize,
-          convertedSize,
-          duration,
-          sampleRate: 48000,
-          channels: 1,
-          bitrate: chosenBitrate,
-          compressionRatio,
-          telegramWaveformBase64: base64Waveform,
-          waveformPeaks: peaks,
-          downloadUrl: `/api/audio/${conversionId}.ogg`,
-          transcodeMs: Date.now() - startTime
-        });
-      } catch (extractErr: any) {
-        console.error('Waveform or metadata extraction error:', extractErr);
-        return res.status(500).json({
-          error: 'Converted audio was generated but metadata analysis failed.',
-          details: extractErr?.message || String(extractErr)
-        });
-      }
-    });
-
-    ffmpegProc.on('error', (err) => {
+    if (!transcodeResult.success) {
+      console.error('FFmpeg transcoding error:', transcodeResult.stderr);
       return res.status(500).json({
-        error: 'Failed to launch FFmpeg process.',
-        details: err.message
+        error: 'ট্রান্সকোডিং সম্পন্ন করা সম্ভব হয়নি। অডিও ফাইলটি ত্রুটিযুক্ত অথবা অসমর্থিত ফরম্যাটের হতে পারে।',
+        details: transcodeResult.stderr.slice(-300)
       });
-    });
+    }
+
+    try {
+      // Also create the counterpart file so WhatsApp (.opus), Messenger (.opus), and Telegram (.ogg) are instantly ready
+      if (isWhatsApp || isMessenger) {
+        if (!fs.existsSync(outputPathOgg)) {
+          fs.copyFileSync(primaryOutputPath, outputPathOgg);
+        }
+      } else {
+        if (!fs.existsSync(outputPathOpus)) {
+          fs.copyFileSync(primaryOutputPath, outputPathOpus);
+        }
+      }
+
+      const stats = fs.statSync(primaryOutputPath);
+      const originalSize = file.size;
+      const convertedSize = stats.size;
+      const compressionRatio = originalSize > 0
+        ? Number(((1 - convertedSize / originalSize) * 100).toFixed(1))
+        : 0;
+
+      // Generate authentic Telegram waveform from the converted audio (with guaranteed fallback)
+      const { peaks, base64Waveform, duration } = await extractWaveformFromAudio(primaryOutputPath);
+
+      const storedData: StoredVoice = {
+        id: conversionId,
+        originalName: file.originalname,
+        originalSize,
+        convertedSize,
+        duration,
+        sampleRate: 48000,
+        channels: 1,
+        bitrate: chosenBitrate,
+        compressionRatio,
+        telegramWaveformBase64: base64Waveform,
+        waveformPeaks: peaks,
+        filePath: outputPathOgg,
+        createdAt: Date.now()
+      };
+
+      voiceStore.set(conversionId, storedData);
+
+      const downloadUrl = (isWhatsApp || isMessenger)
+        ? `/api/audio/${conversionId}.opus`
+        : `/api/audio/${conversionId}.ogg`;
+
+      const normalizedFormat: 'whatsapp' | 'messenger' | 'telegram' = isWhatsApp
+        ? 'whatsapp'
+        : isMessenger
+        ? 'messenger'
+        : 'telegram';
+
+      return res.json({
+        id: conversionId,
+        filename: outputFileName,
+        originalName: file.originalname,
+        originalSize,
+        convertedSize,
+        duration,
+        sampleRate: 48000,
+        channels: 1,
+        bitrate: chosenBitrate,
+        compressionRatio,
+        targetFormat: normalizedFormat,
+        telegramWaveformBase64: base64Waveform,
+        waveformPeaks: peaks,
+        downloadUrl,
+        whatsappDownloadUrl: `/api/audio/${conversionId}.opus`,
+        messengerDownloadUrl: `/api/audio/${conversionId}.opus?app=messenger`,
+        telegramDownloadUrl: `/api/audio/${conversionId}.ogg`,
+        transcodeMs: Date.now() - startTime
+      });
+    } catch (finalErr: any) {
+      console.error('Final response packaging error:', finalErr);
+      return res.status(500).json({
+        error: 'ভয়েস ফাইল তৈরি হয়েছে কিন্তু ফলাফল প্রস্তুত করতে সমস্যা হয়েছে।',
+        details: finalErr?.message || String(finalErr)
+      });
+    }
   });
 
-  // Stream or Download Converted Voice Message
-  app.get('/api/audio/:id.ogg', (req, res) => {
-    const { id } = req.params;
+  // Stream or Download Converted Voice Message (.ogg or .opus)
+  app.get('/api/audio/:file', (req, res) => {
+    const fileParam = req.params.file;
+    const match = fileParam.match(/^([a-f0-9-]+)\.(ogg|opus)$/i);
+    if (!match) {
+      return res.status(404).json({ error: 'Invalid audio path.' });
+    }
+
+    const id = match[1];
+    const ext = match[2].toLowerCase();
     const voice = voiceStore.get(id);
 
-    const filePath = path.join(OUTPUT_DIR, `${id}.ogg`);
-    if (!fs.existsSync(filePath)) {
+    const filePath = path.join(OUTPUT_DIR, `${id}.${ext}`);
+    // Fallback to .ogg or .opus if exact match is missing
+    const fallbackPath = path.join(OUTPUT_DIR, `${id}.${ext === 'opus' ? 'ogg' : 'opus'}`);
+    const finalPath = fs.existsSync(filePath) ? filePath : (fs.existsSync(fallbackPath) ? fallbackPath : null);
+
+    if (!finalPath) {
       return res.status(404).json({ error: 'Audio file not found or expired.' });
     }
 
-    const stat = fs.statSync(filePath);
+    const stat = fs.statSync(finalPath);
     const fileSize = stat.size;
     const range = req.headers.range;
 
-    const rawName = voice ? `${path.parse(voice.originalName).name}_voice.ogg` : 'telegram_voice.ogg';
-    // Clean filename for HTTP header
+    const baseName = voice ? path.parse(voice.originalName).name : 'voice_note';
+    const appQuery = (req.query.app as string) || '';
+    let suffix = 'voice';
+    if (appQuery === 'messenger') {
+      suffix = 'messenger_voice';
+    } else if (ext === 'opus' || appQuery === 'whatsapp') {
+      suffix = 'whatsapp_voice';
+    }
+    const rawName = `${baseName}_${suffix}.${ext}`;
     const safeAsciiName = rawName.replace(/[^\w.-]/g, '_');
 
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -362,7 +466,7 @@ async function startServer() {
       const start = parseInt(parts[0], 10);
       const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
       const chunksize = end - start + 1;
-      const fileStream = fs.createReadStream(filePath, { start, end });
+      const fileStream = fs.createReadStream(finalPath, { start, end });
       res.writeHead(206, {
         'Content-Range': `bytes ${start}-${end}/${fileSize}`,
         'Content-Length': chunksize,
@@ -374,7 +478,7 @@ async function startServer() {
         'Content-Length': fileSize,
         'Content-Type': 'audio/ogg; codecs=opus',
       });
-      fs.createReadStream(filePath).pipe(res);
+      fs.createReadStream(finalPath).pipe(res);
     }
   });
 
@@ -494,6 +598,21 @@ async function startServer() {
         ok: false,
         error: 'Network error communicating with Telegram Bot API.',
         details: err?.message || String(err)
+      });
+    }
+  });
+
+  // Explicit 404 handler for all /api routes to prevent Vite SPA fallback from returning index.html
+  app.all('/api/*', (_req, res) => {
+    res.status(404).json({ error: 'এপিআই রুটটি খুঁজে পাওয়া যায়নি।' });
+  });
+
+  // Global API error handling middleware
+  app.use('/api', (err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('Unhandled API error:', err);
+    if (!res.headersSent) {
+      res.status(err.status || 500).json({
+        error: err.message || 'সার্ভার অনুরোধ প্রক্রিয়া করতে ব্যর্থ হয়েছে।'
       });
     }
   });

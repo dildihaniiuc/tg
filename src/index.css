@@ -8,8 +8,14 @@
 
   body {
     font-family: var(--font-sans);
-    background-color: #0b0f17;
-    color: #f1f5f9;
+    background-color: #04120a;
+    color: #ecfdf5;
+    background-image: 
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(16, 185, 129, 0.15), transparent),
+      radial-gradient(circle 400px at 10% 20%, rgba(5, 150, 105, 0.08), transparent),
+      radial-gradient(circle 500px at 90% 80%, rgba(4, 120, 87, 0.06), transparent);
+    background-attachment: fixed;
+    min-height: 100vh;
   }
 
   code, pre, .font-mono {
@@ -17,21 +23,21 @@
   }
 }
 
-/* Custom subtle scrollbar */
+/* Nature moss custom subtle scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+  background: rgba(4, 18, 10, 0.8);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.2);
+  background: rgba(16, 185, 129, 0.25);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.4);
+  background: rgba(52, 211, 153, 0.45);
 }

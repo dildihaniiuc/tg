@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { ConversionResult, TelegramBotInfo, TelegramSendState } from '../types';
-import { shareAudioToTelegram } from '../utils/audio';
+import { downloadAudioFile, safeJsonFetch } from '../utils/audio';
 
 interface TelegramBotModalProps {
   isOpen: boolean;
@@ -66,20 +66,23 @@ export const TelegramBotModal: React.FC<TelegramBotModalProps> = ({
     setVerifiedBot(null);
 
     try {
-      const response = await fetch('/api/telegram/test-bot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ botToken: botToken.trim() }),
-      });
+      const data = await safeJsonFetch<any>(
+        '/api/telegram/test-bot',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ botToken: botToken.trim() }),
+        },
+        'বট টোকেন যাচাই করা যায়নি।'
+      );
 
-      const data = await response.json();
       if (data.ok) {
         setVerifiedBot(data.bot);
       } else {
         setVerifyError(data.error || 'বট টোকেন যাচাই করা যায়নি।');
       }
     } catch (err: any) {
-      setVerifyError('টেলিগ্রাম সার্ভারে সংযোগ ব্যর্থ হয়েছে। ইন্টারনেট কানেকশন চেক করুন।');
+      setVerifyError(err.message || 'টেলিগ্রাম সার্ভারে সংযোগ ব্যর্থ হয়েছে।');
     } finally {
       setIsVerifying(false);
     }
@@ -108,19 +111,21 @@ export const TelegramBotModal: React.FC<TelegramBotModalProps> = ({
     setSendState({ isSending: true, success: false });
 
     try {
-      const response = await fetch('/api/telegram/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          botToken: botToken.trim(),
-          chatId: chatId.trim(),
-          caption: caption.trim(),
-          audioId: result.id,
-          customWaveform: result.telegramWaveformBase64,
-        }),
-      });
-
-      const data = await response.json();
+      const data = await safeJsonFetch<any>(
+        '/api/telegram/send',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            botToken: botToken.trim(),
+            chatId: chatId.trim(),
+            caption: caption.trim(),
+            audioId: result.id,
+            customWaveform: result.telegramWaveformBase64,
+          }),
+        },
+        'টেলিগ্রামে ভয়েস মেসেজ পাঠানো সম্ভব হয়নি।'
+      );
 
       if (data.ok) {
         setSendState({
@@ -150,7 +155,7 @@ export const TelegramBotModal: React.FC<TelegramBotModalProps> = ({
       setSendState({
         isSending: false,
         success: false,
-        error: 'টেলিগ্রাম সার্ভারের সাথে যোগাযোগে সমস্যা হয়েছে। পুনরায় চেষ্টা করুন।',
+        error: err.message || 'টেলিগ্রাম সার্ভারের সাথে যোগাযোগে সমস্যা হয়েছে।',
       });
     }
   };
@@ -158,16 +163,27 @@ export const TelegramBotModal: React.FC<TelegramBotModalProps> = ({
   const handleDirectShareAlternative = async () => {
     if (!result) return;
     const targetName = `${result.originalName.replace(/\.[^/.]+$/, '')}_voice.ogg`;
-    await shareAudioToTelegram(result.downloadUrl, targetName);
+    try {
+      const res = await fetch(`${result.downloadUrl}?download=1`);
+      const blob = await res.blob();
+      const file = new File([blob], targetName, { type: 'audio/ogg' });
+      if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file] });
+        return;
+      }
+    } catch (e) {
+      // Fallback
+    }
+    await downloadAudioFile(result.downloadUrl, targetName);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-      <div className="relative w-full max-w-xl rounded-2xl border border-white/[0.1] bg-[#121824] p-6 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md overflow-y-auto">
+      <div className="relative w-full max-w-xl rounded-2xl border border-emerald-700/50 bg-[#062114] p-6 shadow-2xl text-emerald-50">
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 rounded-lg p-1.5 text-slate-400 hover:bg-white/[0.06] hover:text-white transition-colors cursor-pointer"
+          className="absolute top-4 right-4 rounded-lg p-1.5 text-emerald-400 hover:bg-emerald-900/40 hover:text-white transition-colors cursor-pointer"
           aria-label="বন্ধ করুন"
         >
           <X className="h-5 w-5" />
@@ -175,27 +191,27 @@ export const TelegramBotModal: React.FC<TelegramBotModalProps> = ({
 
         {/* Modal Title */}
         <div className="flex items-center gap-2.5 mb-1">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-tr from-purple-500 to-cyan-500 text-white shadow-sm">
-            <Send className="h-4 w-4" />
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-emerald-600 via-teal-500 to-lime-400 text-slate-950 shadow-md">
+            <Send className="h-4 w-4 text-slate-950" />
           </div>
           <h2 className="text-lg font-bold text-white tracking-tight">
             টেলিগ্রাম ভয়েস মেসেজ পাঠান
           </h2>
         </div>
-        <p className="text-xs text-slate-400 mb-4">
-          টেলিগ্রামের অফিশিয়াল <code className="text-cyan-300 font-mono">sendVoice</code> এপিআই ব্যবহার করে গোল ভয়েস বাবল ও ওয়েভফর্ম সহ সরাসরি পাঠান।
+        <p className="text-xs text-emerald-300/70 mb-4">
+          টেলিগ্রামের অফিশিয়াল <code className="text-emerald-300 font-mono">sendVoice</code> এপিআই ব্যবহার করে গোল ভয়েস বাবল ও ওয়েভফর্ম সহ সরাসরি পাঠান।
         </p>
 
         {/* Direct Telegram Share Quick Shortcut */}
-        <div className="mb-4 flex items-center justify-between rounded-xl border border-blue-500/20 bg-blue-950/20 p-3 text-xs">
-          <div className="flex items-center gap-2 text-slate-300">
-            <Share2 className="h-4 w-4 text-cyan-400 shrink-0" />
+        <div className="mb-4 flex items-center justify-between rounded-xl border border-emerald-700/40 bg-emerald-950/40 p-3 text-xs">
+          <div className="flex items-center gap-2 text-emerald-200">
+            <Share2 className="h-4 w-4 text-emerald-400 shrink-0" />
             <span>বট ছাড়া সরাসরি আপনার ফোনে টেলিগ্রামে শেয়ার করতে চান?</span>
           </div>
           <button
             type="button"
             onClick={handleDirectShareAlternative}
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-500 transition-colors shrink-0 cursor-pointer"
+            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-500 transition-colors shrink-0 cursor-pointer shadow-sm"
           >
             সরাসরি শেয়ার
           </button>
